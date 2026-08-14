@@ -1,10 +1,29 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BottomNav } from '../components/BottomNav';
+import { supabase } from '../lib/supabase';
+import { AssetMap } from '../lib/assets';
 
 export const Holidays = ({ onNavigate }: any) => {
+  const [holidaysData, setHolidaysData] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchHolidaysData = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('app-data', {
+          body: { target: 'holidays' }
+        });
+        if (!error && data?.success) {
+          setHolidaysData(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch holidays data", err);
+      }
+    };
+    fetchHolidaysData();
+  }, []);
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
@@ -52,66 +71,19 @@ export const Holidays = ({ onNavigate }: any) => {
         
         {/* Holiday Cards List */}
         <View style={styles.cardsList}>
-          <HolidayCard 
-            title="New Year's Day"
-            desc="Start the year with new beginings and new adventures."
-            badgeType="national"
-            day="WED"
-            date="01"
-            month="JAN"
-            image={require('../../assets/season_manali.png')} // Placeholder for fireworks
-            icon="calendar-outline"
-          />
-          <HolidayCard 
-            title="Makar Sankranti"
-            desc="Celebrate the festival of harvest with joy and gratitude."
-            badgeType="festival"
-            day="TUE"
-            date="14"
-            month="JAN"
-            image={require('../../assets/season_darjeeling.png')} // Placeholder for kites
-            icon="leaf-outline"
-          />
-          <HolidayCard 
-            title="Mahashivratri"
-            desc="A divine night dedicated to Lord Shiva."
-            badgeType="festival"
-            day="WED"
-            date="26"
-            month="FEB"
-            image={require('../../assets/season_udaipur.png')} // Placeholder for ghats
-            icon="flame-outline"
-          />
-          <HolidayCard 
-            title="Holi"
-            desc="Festival of colors, joy and happiness."
-            badgeType="festival"
-            day="FRI"
-            date="14"
-            month="MAR"
-            image={require('../../assets/trip_kashmir.png')} // Placeholder for colors
-            icon="color-palette-outline"
-          />
-          <HolidayCard 
-            title="Ram Navami"
-            desc="Celebrate the birth of Lord Rama."
-            badgeType="festival"
-            day="SUN"
-            date="06"
-            month="APR"
-            image={require('../../assets/trip_kerala.png')} // Placeholder for temple
-            icon="home-outline"
-          />
-          <HolidayCard 
-            title="Buddha Purnima"
-            desc="A day of peace, compassion and enlightenment."
-            badgeType="national"
-            day="MON"
-            date="12"
-            month="MAY"
-            image={require('../../assets/season_manali.png')} // Placeholder for statue
-            icon="flower-outline"
-          />
+          {holidaysData?.map((item: any, i: number) => (
+            <HolidayCard 
+              key={i}
+              title={item.title}
+              desc={item.desc}
+              badgeType={item.badgeType}
+              day={item.day}
+              date={item.date}
+              month={item.month}
+              image={AssetMap[item.imageKey]}
+              icon={item.icon}
+            />
+          ))}
         </View>
 
         {/* Bottom Banner */}

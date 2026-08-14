@@ -1,14 +1,32 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialIcons, Ionicons, FontAwesome } from '@expo/vector-icons';
 import { BottomNav } from '../components/BottomNav';
 import { HeaderLogo } from '../components/HeaderLogo';
+import { supabase } from '../lib/supabase';
+import { AssetMap } from '../lib/assets';
 
 const { width } = Dimensions.get('window');
 
 export const Trips = ({ session, onNavigate }: any) => {
-  return (
+  const [tripsData, setTripsData] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchTrips = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('app-data', {
+          body: { target: 'trips' }
+        });
+        if (!error && data?.success) {
+          setTripsData(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch trips data", err);
+      }
+    };
+    fetchTrips();
+  }, []);
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
@@ -32,22 +50,17 @@ export const Trips = ({ session, onNavigate }: any) => {
             </TouchableOpacity>
           </View>
           
-          <UpcomingTripCard 
-            title="Goa Getaway" 
-            location="Goa, India" 
-            date="15 Jun - 20 Jun, 2025" 
-            image={require('../../assets/season_goa.png')} 
-            daysLeft="In 12 days" 
-            people="2" 
-          />
-          <UpcomingTripCard 
-            title="Manali Escape" 
-            location="Manali, Himachal Pradesh" 
-            date="02 Jul - 07 Jul, 2025" 
-            image={require('../../assets/season_manali.png')} 
-            daysLeft="In 29 days" 
-            people="3" 
-          />
+          {tripsData?.slice(0, 2).map((trip: any, i: number) => (
+            <UpcomingTripCard 
+              key={i}
+              title={trip.title} 
+              location={trip.title.split(' ')[0]} 
+              date={trip.date_range} 
+              image={AssetMap[trip.image_key] || AssetMap['trip_kashmir']} 
+              daysLeft="Upcoming" 
+              people="2" 
+            />
+          ))}
         </View>
 
         {/* Current Trip */}

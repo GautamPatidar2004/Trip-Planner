@@ -1,10 +1,29 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BottomNav } from '../components/BottomNav';
+import { supabase } from '../lib/supabase';
+import { AssetMap } from '../lib/assets';
 
 export const Hotspots = ({ onNavigate }: any) => {
+  const [hotspotsData, setHotspotsData] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchHotspotsData = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('app-data', {
+          body: { target: 'hotspots' }
+        });
+        if (!error && data?.success) {
+          setHotspotsData(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch hotspots data", err);
+      }
+    };
+    fetchHotspotsData();
+  }, []);
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
@@ -72,66 +91,19 @@ export const Hotspots = ({ onNavigate }: any) => {
 
         {/* Hotspot Cards List */}
         <View style={styles.cardsList}>
-          <HotspotCard 
-            title="India Gate"
-            category="Historic Landmark"
-            desc="Iconic war memorial and a must-visit landmark of India."
-            distance="2.1 km"
-            rating="4.8"
-            reviews="(2.3k)"
-            image={require('../../assets/season_darjeeling.png')} // Placeholder for India Gate
-            icon="camera-outline"
-          />
-          <HotspotCard 
-            title="Lotus Temple"
-            category="Spiritual Place"
-            desc="A Bahá'í House of Worship known for its stunning architecture."
-            distance="4.7 km"
-            rating="4.7"
-            reviews="(1.8k)"
-            image={require('../../assets/trip_kashmir.png')} // Placeholder for Lotus Temple
-            icon="leaf-outline"
-          />
-          <HotspotCard 
-            title="Khan Market"
-            category="Shopping • Local Market"
-            desc="A popular market for shopping, food and lifestyle."
-            distance="1.6 km"
-            rating="4.6"
-            reviews="(1.2k)"
-            image={require('../../assets/season_manali.png')} // Placeholder for Khan Market
-            icon="bag-outline"
-          />
-          <HotspotCard 
-            title="Humayun's Tomb"
-            category="Historic Site"
-            desc="UNESCO World Heritage Site and stunning Mughal architecture."
-            distance="5.3 km"
-            rating="4.7"
-            reviews="(1.5k)"
-            image={require('../../assets/season_udaipur.png')} // Placeholder for Humayun's Tomb
-            icon="business-outline"
-          />
-          <HotspotCard 
-            title="Diggin Café"
-            category="Café • North Indian"
-            desc="Cozy café with delicious food and a relaxed vibe."
-            distance="1.2 km"
-            rating="4.5"
-            reviews="(980)"
-            image={require('../../assets/hotspot_cafe.png')} // Placeholder for Cafe
-            icon="cafe-outline"
-          />
-          <HotspotCard 
-            title="Lodhi Gardens"
-            category="Park • Outdoor"
-            desc="Beautiful garden with historic tombs and lush greenery."
-            distance="3.2 km"
-            rating="4.6"
-            reviews="(1.1k)"
-            image={require('../../assets/trip_kerala.png')} // Placeholder for Gardens
-            icon="leaf-outline"
-          />
+          {hotspotsData?.map((item: any, i: number) => (
+            <HotspotCard 
+              key={i}
+              title={item.title}
+              category={item.subtitle_or_distance}
+              desc={item.description}
+              distance={item.location}
+              rating={item.rating}
+              reviews={`(${item.reviews})`}
+              image={AssetMap[item.imageKey]}
+              icon={item.icon || 'star'}
+            />
+          ))}
         </View>
 
         <View style={{ height: 100 }} />

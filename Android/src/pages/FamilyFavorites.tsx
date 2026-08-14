@@ -1,11 +1,30 @@
-import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image, Dimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BottomNav } from '../components/BottomNav';
+import { supabase } from '../lib/supabase';
+import { AssetMap } from '../lib/assets';
 
 export const FamilyFavorites = ({ onNavigate }: any) => {
+  const [familyData, setFamilyData] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchFamilyData = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('app-data', {
+          body: { target: 'family' }
+        });
+        if (!error && data?.success) {
+          setFamilyData(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch family data", err);
+      }
+    };
+    fetchFamilyData();
+  }, []);
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
@@ -79,92 +98,21 @@ export const FamilyFavorites = ({ onNavigate }: any) => {
 
         {/* List of Cards */}
         <View style={styles.listContainer}>
-          
-          <FamilyCard 
-            title="National Zoological Park"
-            location="Mathura Road, New Delhi"
-            desc="Explore amazing wildlife and learn about nature with your family."
-            distance="6.2 km"
-            rating="4.6"
-            reviews="1.3k"
-            category="Zoo"
-            categoryIcon="paw"
-            tags={[
-              { text: 'Animals', color: '#ECFDF5', textColor: '#059669' },
-              { text: 'Outdoor', color: '#EFF6FF', textColor: '#2563EB' },
-              { text: 'Family', color: '#F3E8FF', textColor: '#7C3AED' }
-            ]}
-            image={require('../../assets/trip_kashmir.png')}
-          />
-
-          <FamilyCard 
-            title="Adventure Island"
-            location="Rohini, New Delhi"
-            desc="Thrilling rides and water fun for the whole family."
-            distance="15.4 km"
-            rating="4.5"
-            reviews="980"
-            category="Amusement Park"
-            categoryIcon="ticket"
-            tags={[
-              { text: 'Fun', color: '#EFF6FF', textColor: '#2563EB' },
-              { text: 'Adventure', color: '#FFF7ED', textColor: '#EA580C' },
-              { text: 'Family', color: '#F3E8FF', textColor: '#7C3AED' }
-            ]}
-            image={require('../../assets/season_goa.png')}
-          />
-
-          <FamilyCard 
-            title="National Science Centre"
-            location="Pragati Maidan, New Delhi"
-            desc="Interactive exhibits that make learning fun for kids and adults."
-            distance="4.8 km"
-            rating="4.4"
-            reviews="760"
-            category="Museum"
-            categoryIcon="business"
-            tags={[
-              { text: 'Learning', color: '#EFF6FF', textColor: '#2563EB' },
-              { text: 'Indoor', color: '#FFF7ED', textColor: '#EA580C' },
-              { text: 'Family', color: '#F3E8FF', textColor: '#7C3AED' }
-            ]}
-            image={require('../../assets/season_udaipur.png')}
-          />
-
-          <FamilyCard 
-            title="Lodhi Garden"
-            location="Lodhi Road, New Delhi"
-            desc="Beautiful garden perfect for picnics, morning walks and playtime."
-            distance="3.1 km"
-            rating="4.6"
-            reviews="1.1k"
-            category="Garden"
-            categoryIcon="leaf"
-            tags={[
-              { text: 'Nature', color: '#ECFDF5', textColor: '#059669' },
-              { text: 'Picnic', color: '#FEF2F2', textColor: '#DC2626' },
-              { text: 'Family', color: '#F3E8FF', textColor: '#7C3AED' }
-            ]}
-            image={require('../../assets/hotspot_garden.png')}
-          />
-          
-          <FamilyCard 
-            title="Delhi Aquarium"
-            location="Bahar Gate, New Delhi"
-            desc="Discover the magical underwater world with your little explorers."
-            distance="5.7 km"
-            rating="4.3"
-            reviews="540"
-            category="Aquarium"
-            categoryIcon="water"
-            tags={[
-              { text: 'Aquatic', color: '#EFF6FF', textColor: '#2563EB' },
-              { text: 'Indoor', color: '#FFF7ED', textColor: '#EA580C' },
-              { text: 'Family', color: '#F3E8FF', textColor: '#7C3AED' }
-            ]}
-            image={require('../../assets/trip_kerala.png')}
-          />
-
+          {familyData?.map((item: any, i: number) => (
+            <FamilyCard 
+              key={i}
+              title={item.title}
+              location={item.location}
+              desc={item.description}
+              distance={item.subtitle_or_distance}
+              rating={item.rating}
+              reviews={item.reviews}
+              category={item.category}
+              categoryIcon={item.icon}
+              tags={typeof item.tags === 'string' ? JSON.parse(item.tags) : (item.tags || [])}
+              image={AssetMap[item.imageKey]}
+            />
+          ))}
         </View>
 
         {/* Bottom Banner */}
