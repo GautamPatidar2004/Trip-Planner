@@ -79,8 +79,10 @@ export const AIPage = ({ session, onNavigate }: any) => {
         }
       });
 
+      // Surface the actual error from the edge function for easier debugging
+      const fnError = error?.message || (data && !data.success ? data.error : null);
       if (error || !data || !data.success || !data.plan) {
-        throw new Error(data?.error || "Failed to generate plan");
+        throw new Error(fnError || "Failed to generate plan");
       }
 
       setGeneratedPlan(data.plan);
@@ -89,7 +91,7 @@ export const AIPage = ({ session, onNavigate }: any) => {
         `🎉 Verified Trip Plan Ready`
       );
     } catch (err: any) {
-      console.warn("Trip planning error:", err);
+      console.warn("Trip planning error:", err?.message || err);
       setPlanError("Sorry, I couldn't create your trip plan right now. Please try again.");
       addAIMessage(
         "Sorry, I couldn't create your trip plan right now. Please try again.",

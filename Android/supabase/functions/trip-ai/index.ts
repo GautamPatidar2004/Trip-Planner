@@ -299,7 +299,7 @@ CRITICAL PLANNING RULES:
           console.warn("Gemini response failed structured validation. Initiating Groq fallback.");
         }
       } catch (geminiErr: any) {
-        console.warn("Gemini provider failed, initiating Groq fallback:", geminiErr?.message ? "API Error" : "Unknown error");
+        console.warn("Gemini provider failed, initiating Groq fallback:", geminiErr?.message || "Unknown error");
       }
     }
 
@@ -316,16 +316,24 @@ CRITICAL PLANNING RULES:
           console.warn("Groq response failed structured validation.");
         }
       } catch (groqErr: any) {
-        console.warn("Groq fallback provider failed:", groqErr?.message ? "API Error" : "Unknown error");
+        console.warn("Groq fallback provider failed:", groqErr?.message || "Unknown error");
       }
     }
 
     // STEP C: If both providers failed or yielded invalid structured outputs
     if (!validatedPlan || !providerUsed) {
+      const providerNote = !geminiKey && !groqKey
+        ? "No AI provider API keys configured (GEMINI_API_KEY / GROQ_API_KEY)."
+        : !geminiKey
+        ? "GEMINI_API_KEY not set; Groq fallback also failed."
+        : !groqKey
+        ? "GROQ_API_KEY not set; Gemini also failed."
+        : "Both Gemini and Groq providers failed or returned invalid plans.";
+      console.error("trip-ai: all providers failed.", providerNote);
       return new Response(
         JSON.stringify({
           success: false,
-          error: "Unable to generate your trip plan right now.",
+          error: providerNote,
         }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -349,11 +357,12 @@ CRITICAL PLANNING RULES:
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
-    console.error("Trip AI Edge Function top-level error:", error?.message ? "Internal Error" : "Unknown error");
+    const errMsg = error?.message || String(error) || "Unknown error";
+    console.error("Trip AI Edge Function top-level error:", errMsg);
     return new Response(
       JSON.stringify({
         success: false,
-        error: "Unable to generate your trip plan right now.",
+        error: errMsg,
       }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

@@ -5,7 +5,7 @@ import {
   NormalizedVehicle,
   NormalizedTransport,
   NormalizedSuggestedPlace,
-} from './travel-service.ts'
+} from './types.ts'
 
 // ==========================================
 // Feasibility & Budget Interfaces
