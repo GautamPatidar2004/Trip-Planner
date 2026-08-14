@@ -1,13 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ImageBackground, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { HeaderLogo } from '../components/HeaderLogo';
 import { BottomNav } from '../components/BottomNav';
 import { PlanTripModal } from '../components/PlanTripModal';
+import { supabase } from '../lib/supabase';
+import { AssetMap } from '../lib/assets';
 
 export const Dashboard = ({ session, onNavigate }: any) => {
   const [isPlanModalVisible, setPlanModalVisible] = useState(false);
+  const [dashboardData, setDashboardData] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('app-data', {
+          body: { target: 'dashboard' }
+        });
+        if (!error && data?.success) {
+          setDashboardData(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch dashboard data", err);
+      }
+    };
+    fetchDashboardData();
+  }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
@@ -51,10 +70,9 @@ export const Dashboard = ({ session, onNavigate }: any) => {
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-             <HolidayCard dateNum="15" dateMonth="AUG" title="Independence Day" day="Friday" flag="🇮🇳" />
-             <HolidayCard dateNum="05" dateMonth="SEP" title="Teachers' Day" day="Friday" flag="🇮🇳" />
-             <HolidayCard dateNum="02" dateMonth="OCT" title="Gandhi Jayanti" day="Thursday" flag="🇮🇳" />
-             <HolidayCard dateNum="31" dateMonth="OCT" title="Diwali" day="Friday" flag="🇮🇳" />
+            {dashboardData?.upcomingHolidays?.map((item: any, i: number) => (
+              <HolidayCard key={i} {...item} />
+            ))}
           </ScrollView>
         </View>
 
@@ -70,9 +88,9 @@ export const Dashboard = ({ session, onNavigate }: any) => {
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-             <HotspotCard image={require('../../assets/hotspot_cafe.png')} icon="cafe-outline" title="Brewed Awakenings" distance="Cafe • 1.2 km" rating="4.6" />
-             <HotspotCard image={require('../../assets/hotspot_garden.png')} icon="leaf-outline" title="Greenview Garden" distance="Park • 2.4 km" rating="4.7" />
-             <HotspotCard image={require('../../assets/hotspot_sunset.png')} icon="triangle-outline" title="Sunset Point" distance="Viewpoint • 3.1 km" rating="4.8" />
+            {dashboardData?.hotspotsNearYou?.map((item: any, i: number) => (
+              <HotspotCard key={i} image={AssetMap[item.imageKey]} icon={item.icon} title={item.title} distance={item.distance} rating={item.rating} />
+            ))}
           </ScrollView>
         </View>
 
@@ -88,10 +106,9 @@ export const Dashboard = ({ session, onNavigate }: any) => {
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-            <SeasonSpotCard image={require('../../assets/season_manali.png')} title="Manali" subtitle="Himachal Pradesh" rating="4.8" />
-            <SeasonSpotCard image={require('../../assets/season_goa.png')} title="Goa" subtitle="Goa" rating="4.7" />
-            <SeasonSpotCard image={require('../../assets/season_udaipur.png')} title="Udaipur" subtitle="Rajasthan" rating="4.8" />
-            <SeasonSpotCard image={require('../../assets/season_darjeeling.png')} title="Darjeeling" subtitle="West Bengal" rating="4.7" />
+            {dashboardData?.popularSeasonSpots?.map((item: any, i: number) => (
+              <SeasonSpotCard key={i} image={AssetMap[item.imageKey]} title={item.title} subtitle={item.subtitle} rating={item.rating} />
+            ))}
           </ScrollView>
         </View>
 
@@ -107,10 +124,9 @@ export const Dashboard = ({ session, onNavigate }: any) => {
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-             <TipCard icon="shield-checkmark-outline" text={"Keep a digital\ncopy of your\nimportant docs."} bgColor="#EDF5FF" iconColor="#2260FF" />
-             <TipCard icon="briefcase-outline" text={"Pack light and\nsmart, always."} bgColor="#F6EDFF" iconColor="#8B5CF6" />
-             <TipCard icon="airplane-outline" text={"Book flights\nearly for better\ndeals."} bgColor="#E8FBF4" iconColor="#10B981" />
-             <TipCard icon="wallet-outline" text={"Keep local\ncurrency for\nsmall expenses."} bgColor="#FFF3E8" iconColor="#F97316" />
+            {dashboardData?.tipsForTravelers?.map((item: any, i: number) => (
+              <TipCard key={i} {...item} />
+            ))}
           </ScrollView>
         </View>
 

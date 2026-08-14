@@ -1,13 +1,31 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BottomNav } from '../components/BottomNav';
+import { supabase } from '../lib/supabase';
+import { AssetMap } from '../lib/assets';
 
 const { width } = Dimensions.get('window');
 
 export const ExploreMap = ({ onNavigate }: any) => {
-  return (
+  const [exploreData, setExploreData] = useState<any>({ markers: [], places: [] });
+
+  useEffect(() => {
+    const fetchExploreData = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('app-data', {
+          body: { target: 'explore_map' }
+        });
+        if (!error && data?.success) {
+          setExploreData(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch explore data", err);
+      }
+    };
+    fetchExploreData();
+  }, []);
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
@@ -82,26 +100,16 @@ export const ExploreMap = ({ onNavigate }: any) => {
           </TouchableOpacity>
         </View>
 
-        {/* Dummy Map Markers */}
-        <View style={[styles.marker, { top: '15%', left: '20%' }]}>
-          <View style={[styles.markerIconBg, { backgroundColor: '#10B981' }]}>
-            <Ionicons name="paw" size={12} color="#ffffff" />
+        {/* Map Markers */}
+        {exploreData?.markers?.map((marker: any, index: number) => (
+          <View key={index} style={[styles.marker, { top: marker.lat, left: marker.lng }]}>
+            <View style={[styles.markerIconBg, { backgroundColor: marker.bg_color || '#3B82F6' }]}>
+              {marker.icon ? <Ionicons name={marker.icon as any} size={12} color="#ffffff" /> : null}
+            </View>
+            {marker.title && <Text style={styles.markerText}>{marker.title}</Text>}
+            {marker.distance && <Text style={styles.markerSubText}>{marker.distance}</Text>}
           </View>
-          <Text style={styles.markerText}>Delhi Zoo</Text>
-          <Text style={styles.markerSubText}>6.2 km</Text>
-        </View>
-
-        <View style={[styles.marker, { top: '25%', left: '55%' }]}>
-          <View style={[styles.markerIconBg, { backgroundColor: '#EC4899' }]}>
-            <Ionicons name="heart" size={12} color="#ffffff" />
-          </View>
-          <Text style={styles.markerText}>India Gate Lawns</Text>
-          <Text style={styles.markerSubText}>2.1 km</Text>
-        </View>
-
-        <View style={[styles.marker, { top: '35%', left: '35%' }]}>
-          <View style={[styles.markerIconBg, { backgroundColor: '#3B82F6', width: 24, height: 24, borderRadius: 12, borderWidth: 3, borderColor: 'rgba(59, 130, 246, 0.3)' }]} />
-        </View>
+        ))}
 
         {/* Scrollable Bottom Sheet */}
         <ScrollView 
@@ -120,65 +128,19 @@ export const ExploreMap = ({ onNavigate }: any) => {
 
             {/* Places List */}
             <View style={styles.listContainer}>
-              <PlaceCard 
-                title="India Gate Lawns"
-                location="Rajpath, New Delhi"
-                desc="Beautiful lawns perfect for evening strolls and family time."
-                distance="2.1 km"
-                rating="4.6"
-                reviews="1.2k"
-                tags={[
-                  { text: 'Romantic', color: '#FDF2F8', textColor: '#F43F5E' },
-                  { text: 'Family', color: '#F3E8FF', textColor: '#8B5CF6' },
-                  { text: 'Outdoor', color: '#ECFDF5', textColor: '#10B981' }
-                ]}
-                image={require('../../assets/season_udaipur.png')}
-              />
-
-              <PlaceCard 
-                title="Sanjay Lake"
-                location="Vasant Kunj, New Delhi"
-                desc="Peaceful lake with boating and picnic spots."
-                distance="8.7 km"
-                rating="4.4"
-                reviews="870"
-                tags={[
-                  { text: 'Nature', color: '#ECFDF5', textColor: '#10B981' },
-                  { text: 'Family', color: '#F3E8FF', textColor: '#8B5CF6' },
-                  { text: 'Relaxation', color: '#EFF6FF', textColor: '#3B82F6' }
-                ]}
-                image={require('../../assets/trip_kashmir.png')}
-              />
-
-              <PlaceCard 
-                title="Adventure Island"
-                location="Rohini, New Delhi"
-                desc="Exciting rides and water fun for the whole family."
-                distance="15.4 km"
-                rating="4.5"
-                reviews="980"
-                tags={[
-                  { text: 'Adventure', color: '#FFF7ED', textColor: '#EA580C' },
-                  { text: 'Fun', color: '#EFF6FF', textColor: '#3B82F6' },
-                  { text: 'Family', color: '#F3E8FF', textColor: '#8B5CF6' }
-                ]}
-                image={require('../../assets/season_goa.png')}
-              />
-              
-              <PlaceCard 
-                title="Lodhi Garden"
-                location="Lodhi Road, New Delhi"
-                desc="Beautiful garden perfect for picnics and morning walks."
-                distance="3.1 km"
-                rating="4.6"
-                reviews="1.1k"
-                tags={[
-                  { text: 'Nature', color: '#ECFDF5', textColor: '#10B981' },
-                  { text: 'Family', color: '#F3E8FF', textColor: '#8B5CF6' },
-                  { text: 'Picnic', color: '#FEF2F2', textColor: '#EF4444' }
-                ]}
-                image={require('../../assets/hotspot_garden.png')}
-              />
+              {exploreData?.places?.map((place: any, i: number) => (
+                <PlaceCard 
+                  key={i}
+                  title={place.title}
+                  location={place.location}
+                  desc={place.description}
+                  distance={place.subtitle_or_distance}
+                  rating={place.rating}
+                  reviews={place.reviews}
+                  tags={typeof place.tags === 'string' ? JSON.parse(place.tags) : (place.tags || [])}
+                  image={AssetMap[place.imageKey]}
+                />
+              ))}
             </View>
             
             <View style={{ height: 40 }} />
