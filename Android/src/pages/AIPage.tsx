@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -12,6 +12,7 @@ export const AIPage = ({ session, onNavigate }: any) => {
     {
       id: 'initial_1',
       sender: 'ai',
+      title: '👋 Hi Explorer!',
       text: 'Hi, I am here for you to plan a new journey.',
       timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     },
@@ -23,7 +24,7 @@ export const AIPage = ({ session, onNavigate }: any) => {
     }
   ]);
   const [isLoading, setIsLoading] = useState(false);
-  const [itinerary, setItinerary] = useState<any>(null);
+  const isSendingRef = useRef(false);
 
   const [currentStep, setCurrentStep] = useState<'fromLocation' | 'toLocation' | 'budget' | 'numberOfPeople' | 'numberOfDays' | 'done'>('fromLocation');
   const [tripDetails, setTripDetails] = useState({
@@ -35,81 +36,54 @@ export const AIPage = ({ session, onNavigate }: any) => {
     numberOfDays: 0
   });
 
-  const addAIMessage = (text: string) => {
+  // Scroll to bottom when a new message is added
+  useEffect(() => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }, [messages]);
+
+  const addAIMessage = (text: string, title?: string) => {
     setMessages(prev => [...prev, {
       id: Date.now().toString() + '_ai',
       sender: 'ai',
+      title: title,
       text: text,
       timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     }]);
   };
 
-  const addAIItineraryMessage = (itineraryData: any) => {
-    setMessages(prev => [...prev, {
-      id: Date.now().toString() + '_ai_itin',
-      sender: 'ai_itinerary',
-      itinerary: itineraryData,
-      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-    }]);
-  };
-
-  const callTripAI = async (details: any) => {
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('trip-ai', {
-        body: details
-      });
-
-      if (error) {
-        throw new Error(error.message || 'Error calling trip-ai');
-      }
-
-      if (data && data.success) {
-        if (data.itinerary) {
-          setItinerary(data.itinerary);
-          addAIMessage(data.message || "I have generated your trip plan! The details are ready.");
-          addAIItineraryMessage(data.itinerary);
-        } else {
-          addAIMessage(data.message || "Trip requirements received successfully.");
-        }
-        setCurrentStep('completed' as any);
-      } else {
-        addAIMessage("Something went wrong on our end. Type 'retry' to try again.");
-      }
-    } catch (error: any) {
-      console.error(error);
-      addAIMessage("Network error. Could not connect to the trip planner. Type 'retry' to try again.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const processAnswer = (answer: string) => {
     setIsLoading(false);
-    
+    const cleanAnswer = answer.trim();
+
     switch (currentStep) {
       case 'fromLocation':
-        if (answer.length < 2) {
+        if (!cleanAnswer) {
           addAIMessage("Please enter a valid starting location. Where are you travelling from?");
         } else {
-          setTripDetails(prev => ({ ...prev, fromLocation: answer }));
+          setTripDetails(prev => ({ ...prev, fromLocation: cleanAnswer }));
           setCurrentStep('toLocation');
           addAIMessage("Where do you want to go?");
         }
         break;
       
       case 'toLocation':
-        if (answer.length < 2) {
+        if (!cleanAnswer) {
           addAIMessage("Please enter a valid destination. Where do you want to go?");
         } else {
-          setTripDetails(prev => ({ ...prev, toLocation: answer }));
+          setTripDetails(prev => ({ ...prev, toLocation: cleanAnswer }));
           setCurrentStep('budget');
           addAIMessage("What is your total budget?");
         }
         break;
 
       case 'budget':
-        let budgetVal = answer.replace(/[^0-9.kK]/g, '');
+        if (!cleanAnswer) {
+          addAIMessage("Please enter your total budget. What is your total budget?");
+          break;
+        }
+        let budgetVal = cleanAnswer.replace(/[^0-9.kK]/g, '');
         let num = 0;
         if (budgetVal.toLowerCase().includes('k')) {
           num = parseFloat(budgetVal.toLowerCase().replace('k', '')) * 1000;
@@ -120,14 +94,27 @@ export const AIPage = ({ session, onNavigate }: any) => {
         if (isNaN(num) || num <= 0) {
           addAIMessage("Please enter a valid positive number for your budget (e.g., 15000 or 15k). What is your total budget?");
         } else {
-          setTripDetails(prev => ({ ...prev, budget: num }));
+          let currency = 'INR';
+          const symbolMatch = cleanAnswer.match(/^([^0-9\s]+)/);
+          if (symbolMatch && symbolMatch[1]) {
+            currency = symbolMatch[1];
+          } else if (cleanAnswer.toLowerCase().includes('inr') || cleanAnswer.includes('₹')) {
+            currency = '₹';
+          } else if (cleanAnswer.toLowerCase().includes('usd') || cleanAnswer.includes('$')) {
+            currency = '$';
+          }
+          setTripDetails(prev => ({ ...prev, budget: num, currency: currency }));
           setCurrentStep('numberOfPeople');
           addAIMessage("How many people are travelling?");
         }
         break;
 
       case 'numberOfPeople':
-        let people = parseInt(answer.replace(/[^0-9]/g, ''), 10);
+        if (!cleanAnswer) {
+          addAIMessage("Please enter the number of people. How many people are travelling?");
+          break;
+        }
+        let people = parseInt(cleanAnswer.replace(/[^0-9]/g, ''), 10);
         if (isNaN(people) || people <= 0) {
           addAIMessage("Please enter a valid number of people. How many people are travelling?");
         } else {
@@ -138,35 +125,28 @@ export const AIPage = ({ session, onNavigate }: any) => {
         break;
 
       case 'numberOfDays':
-        let days = parseInt(answer.replace(/[^0-9]/g, ''), 10);
+        if (!cleanAnswer) {
+          addAIMessage("Please enter the number of days. How many days do you want to travel?");
+          break;
+        }
+        let days = parseInt(cleanAnswer.replace(/[^0-9]/g, ''), 10);
         if (isNaN(days) || days <= 0) {
           addAIMessage("Please enter a valid number of days. How many days do you want to travel?");
         } else {
-          const updatedDetails = { ...tripDetails, numberOfDays: days };
-          setTripDetails(updatedDetails);
+          setTripDetails(prev => ({ ...prev, numberOfDays: days }));
           setCurrentStep('done');
           addAIMessage("Great! I have all the basic details. Let me plan your journey.");
-          callTripAI(updatedDetails);
         }
         break;
         
       case 'done':
-        if (answer.toLowerCase() === 'retry') {
-          addAIMessage("Retrying connection to trip planner...");
-          callTripAI(tripDetails);
-        } else {
-          addAIMessage("I'm working on your plan. Please wait a moment.");
-        }
-        break;
-        
-      case 'completed' as any:
-        addAIMessage("I have already sent your requirements! Waiting for next steps.");
+        addAIMessage("Great! I have all the basic details. Let me plan your journey.");
         break;
     }
   };
 
   const handleSend = () => {
-    if (isLoading) return;
+    if (isLoading || isSendingRef.current) return;
     const text = inputText.trim();
     if (!text) return;
 
@@ -177,11 +157,13 @@ export const AIPage = ({ session, onNavigate }: any) => {
       timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     };
 
+    isSendingRef.current = true;
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsLoading(true);
 
     setTimeout(() => {
+      isSendingRef.current = false;
       processAnswer(text);
     }, 1000);
   };
@@ -221,95 +203,19 @@ export const AIPage = ({ session, onNavigate }: any) => {
       >
         
         {messages.map((msg: any) => {
-          if (msg.sender === 'ai_itinerary') {
-            const itin = msg.itinerary;
-            const cur = itin?.tripSummary?.currency || 'INR';
-            return (
-              <View key={msg.id} style={styles.aiMessageContainer}>
-                {/* Trip Summary Card */}
-                <View style={[styles.itineraryCard, { width: '100%', marginBottom: 12 }]}>
-                  <View style={styles.cardHeader}>
-                    <View style={styles.sparkleIconContainer}>
-                      <Ionicons name="map" size={16} color="#2260FF" />
-                    </View>
-                    <Text style={styles.cardTitle}>Trip Summary</Text>
-                  </View>
-                  <Text style={styles.itineraryDesc}>
-                    <Text style={{fontWeight: '700'}}>{itin?.tripSummary?.from || 'Unknown'}</Text> to <Text style={{fontWeight: '700'}}>{itin?.tripSummary?.destination || 'Unknown'}</Text>{"\n"}
-                    {itin?.tripSummary?.days || 0} Days • {itin?.tripSummary?.people || 0} People{"\n"}
-                    Total Budget: {cur} {itin?.tripSummary?.budget || 0}
-                  </Text>
-                  
-                  {/* Transport & Hotel */}
-                  <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 12 }}>
-                    <Text style={[styles.itineraryTitle, { marginBottom: 4 }]}>Transport & Stay</Text>
-                    <Text style={styles.itineraryDesc}>
-                      🚗 {itin?.transport?.type || 'Not provided'} ({itin?.transport?.status || 'Unknown'}) - {cur} {itin?.transport?.estimatedCost || 'N/A'}{"\n"}
-                      🏨 {itin?.hotel?.name || 'Not provided'} ({itin?.hotel?.status || 'Unknown'}) - {cur} {itin?.hotel?.estimatedCost || 'N/A'}
-                    </Text>
-                  </View>
-
-                  {/* Budget Breakdown */}
-                  <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 12 }}>
-                    <Text style={[styles.itineraryTitle, { marginBottom: 4 }]}>Estimated Budget Breakdown</Text>
-                    <Text style={styles.itineraryDesc}>
-                      Transport: {cur} {itin?.budgetBreakdown?.transport || 0}{"\n"}
-                      Hotel: {cur} {itin?.budgetBreakdown?.hotel || 0}{"\n"}
-                      Local Travel: {cur} {itin?.budgetBreakdown?.localTransport || 0}{"\n"}
-                      Activities: {cur} {itin?.budgetBreakdown?.activities || 0}{"\n"}
-                      Food: {cur} {itin?.budgetBreakdown?.food || 0}{"\n"}
-                      Buffer: {cur} {itin?.budgetBreakdown?.buffer || 0}{"\n"}
-                      Total: <Text style={{fontWeight: '700', color: '#10B981'}}>{cur} {itin?.budgetBreakdown?.total || 0}</Text>
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Day by Day Itinerary */}
-                {itin?.days?.map((d: any, idx: number) => (
-                  <View key={`day_${idx}`} style={[styles.itineraryCard, { width: '100%', marginBottom: 12 }]}>
-                    <View style={styles.cardHeader}>
-                      <View style={[styles.sparkleIconContainer, { backgroundColor: '#E8FBF4' }]}>
-                        <Ionicons name="calendar" size={16} color="#10B981" />
-                      </View>
-                      <Text style={styles.cardTitle}>Day {d.day}</Text>
-                    </View>
-                    <View style={styles.itineraryList}>
-                      {d.activities?.map((act: any, actIdx: number) => (
-                        <View key={`act_${actIdx}`} style={[styles.itineraryItem, { alignItems: 'flex-start' }]}>
-                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#2260FF', marginRight: 12, marginTop: 6 }} />
-                          <View style={styles.itineraryDetails}>
-                            <Text style={styles.itineraryTitle}>{act.name || 'Activity'}</Text>
-                            <Text style={styles.itineraryDesc}>
-                              {act.startTime || ''} - {act.endTime || ''} {act.duration ? `(${act.duration})` : ''}{"\n"}
-                              {act.location ? `📍 ${act.location}\n` : ''}
-                              {act.description || ''}
-                            </Text>
-                            {act.estimatedCost > 0 && (
-                              <View style={[styles.itineraryDayBadge, { marginTop: 6, backgroundColor: '#FFF3E8' }]}>
-                                <Text style={[styles.itineraryDayText, { color: '#F97316' }]}>Est. Cost: {cur} {act.estimatedCost}</Text>
-                              </View>
-                            )}
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ))}
-                
-                {msg.timestamp && <Text style={styles.timestampLeft}>{msg.timestamp}</Text>}
-              </View>
-            );
-          } else if (msg.sender === 'ai') {
+          if (msg.sender === 'ai') {
             return (
               <View key={msg.id} style={styles.aiMessageContainer}>
                 <View style={styles.aiMessageBubble}>
-                  <Text style={styles.aiMessageTitle}>👋 Hi Explorer!</Text>
+                  {msg.title ? (
+                    <Text style={styles.aiMessageTitle}>{msg.title}</Text>
+                  ) : null}
                   <Text style={styles.aiMessageText}>{msg.text}</Text>
                 </View>
                 {msg.timestamp && <Text style={styles.timestampLeft}>{msg.timestamp}</Text>}
               </View>
             );
-          } else {
+          } else if (msg.sender === 'user') {
             return (
               <View key={msg.id} style={styles.userMessageContainer}>
                 <View style={styles.userMessageBubble}>
@@ -321,6 +227,8 @@ export const AIPage = ({ session, onNavigate }: any) => {
                 </View>
               </View>
             );
+          } else {
+            return null;
           }
         })}
 
