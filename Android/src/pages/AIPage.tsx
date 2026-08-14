@@ -1,12 +1,194 @@
-import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Image, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BottomNav } from '../components/BottomNav';
-
+import { supabase } from '../lib/supabase';
 export const AIPage = ({ session, onNavigate }: any) => {
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [isAIActive, setIsAIActive] = useState(true);
+  const [inputText, setInputText] = useState('');
+  const [messages, setMessages] = useState<any[]>([
+    {
+      id: 'initial_1',
+      sender: 'ai',
+      text: 'Hi, I am here for you to plan a new journey.',
+      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    },
+    {
+      id: 'initial_2',
+      sender: 'ai',
+      text: 'Where are you travelling from?',
+      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    }
+  ]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [itinerary, setItinerary] = useState<any>(null);
+
+  const [currentStep, setCurrentStep] = useState<'fromLocation' | 'toLocation' | 'budget' | 'numberOfPeople' | 'numberOfDays' | 'done'>('fromLocation');
+  const [tripDetails, setTripDetails] = useState({
+    fromLocation: '',
+    toLocation: '',
+    budget: 0,
+    currency: 'INR',
+    numberOfPeople: 0,
+    numberOfDays: 0
+  });
+
+  const addAIMessage = (text: string) => {
+    setMessages(prev => [...prev, {
+      id: Date.now().toString() + '_ai',
+      sender: 'ai',
+      text: text,
+      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    }]);
+  };
+
+  const addAIItineraryMessage = (itineraryData: any) => {
+    setMessages(prev => [...prev, {
+      id: Date.now().toString() + '_ai_itin',
+      sender: 'ai_itinerary',
+      itinerary: itineraryData,
+      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    }]);
+  };
+
+  const callTripAI = async (details: any) => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('trip-ai', {
+        body: details
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Error calling trip-ai');
+      }
+
+      if (data && data.success) {
+        if (data.itinerary) {
+          setItinerary(data.itinerary);
+          addAIMessage(data.message || "I have generated your trip plan! The details are ready.");
+          addAIItineraryMessage(data.itinerary);
+        } else {
+          addAIMessage(data.message || "Trip requirements received successfully.");
+        }
+        setCurrentStep('completed' as any);
+      } else {
+        addAIMessage("Something went wrong on our end. Type 'retry' to try again.");
+      }
+    } catch (error: any) {
+      console.error(error);
+      addAIMessage("Network error. Could not connect to the trip planner. Type 'retry' to try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const processAnswer = (answer: string) => {
+    setIsLoading(false);
+    
+    switch (currentStep) {
+      case 'fromLocation':
+        if (answer.length < 2) {
+          addAIMessage("Please enter a valid starting location. Where are you travelling from?");
+        } else {
+          setTripDetails(prev => ({ ...prev, fromLocation: answer }));
+          setCurrentStep('toLocation');
+          addAIMessage("Where do you want to go?");
+        }
+        break;
+      
+      case 'toLocation':
+        if (answer.length < 2) {
+          addAIMessage("Please enter a valid destination. Where do you want to go?");
+        } else {
+          setTripDetails(prev => ({ ...prev, toLocation: answer }));
+          setCurrentStep('budget');
+          addAIMessage("What is your total budget?");
+        }
+        break;
+
+      case 'budget':
+        let budgetVal = answer.replace(/[^0-9.kK]/g, '');
+        let num = 0;
+        if (budgetVal.toLowerCase().includes('k')) {
+          num = parseFloat(budgetVal.toLowerCase().replace('k', '')) * 1000;
+        } else {
+          num = parseFloat(budgetVal);
+        }
+        
+        if (isNaN(num) || num <= 0) {
+          addAIMessage("Please enter a valid positive number for your budget (e.g., 15000 or 15k). What is your total budget?");
+        } else {
+          setTripDetails(prev => ({ ...prev, budget: num }));
+          setCurrentStep('numberOfPeople');
+          addAIMessage("How many people are travelling?");
+        }
+        break;
+
+      case 'numberOfPeople':
+        let people = parseInt(answer.replace(/[^0-9]/g, ''), 10);
+        if (isNaN(people) || people <= 0) {
+          addAIMessage("Please enter a valid number of people. How many people are travelling?");
+        } else {
+          setTripDetails(prev => ({ ...prev, numberOfPeople: people }));
+          setCurrentStep('numberOfDays');
+          addAIMessage("How many days do you want to travel?");
+        }
+        break;
+
+      case 'numberOfDays':
+        let days = parseInt(answer.replace(/[^0-9]/g, ''), 10);
+        if (isNaN(days) || days <= 0) {
+          addAIMessage("Please enter a valid number of days. How many days do you want to travel?");
+        } else {
+          const updatedDetails = { ...tripDetails, numberOfDays: days };
+          setTripDetails(updatedDetails);
+          setCurrentStep('done');
+          addAIMessage("Great! I have all the basic details. Let me plan your journey.");
+          callTripAI(updatedDetails);
+        }
+        break;
+        
+      case 'done':
+        if (answer.toLowerCase() === 'retry') {
+          addAIMessage("Retrying connection to trip planner...");
+          callTripAI(tripDetails);
+        } else {
+          addAIMessage("I'm working on your plan. Please wait a moment.");
+        }
+        break;
+        
+      case 'completed' as any:
+        addAIMessage("I have already sent your requirements! Waiting for next steps.");
+        break;
+    }
+  };
+
+  const handleSend = () => {
+    if (isLoading) return;
+    const text = inputText.trim();
+    if (!text) return;
+
+    const userMsg = {
+      id: Date.now().toString(),
+      sender: 'user',
+      text: text,
+      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    setInputText('');
+    setIsLoading(true);
+
+    setTimeout(() => {
+      processAnswer(text);
+    }, 1000);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.iconButton} onPress={() => onNavigate?.('Dashboard')}>
@@ -31,103 +213,125 @@ export const AIPage = ({ session, onNavigate }: any) => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        ref={scrollViewRef}
+        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({animated: true})}
+        showsVerticalScrollIndicator={false} 
+        contentContainerStyle={styles.scrollContent}
+      >
         
-        {/* AI Message */}
-        <View style={styles.aiMessageContainer}>
-          <View style={styles.aiMessageBubble}>
-            <Text style={styles.aiMessageTitle}>👋 Hi Explorer!</Text>
-            <Text style={styles.aiMessageText}>
-              I'm here to help you plan the perfect trip. Where shall we go today?
-            </Text>
-          </View>
-          <Text style={styles.timestampLeft}>9:30 AM</Text>
-        </View>
+        {messages.map((msg: any) => {
+          if (msg.sender === 'ai_itinerary') {
+            const itin = msg.itinerary;
+            const cur = itin?.tripSummary?.currency || 'INR';
+            return (
+              <View key={msg.id} style={styles.aiMessageContainer}>
+                {/* Trip Summary Card */}
+                <View style={[styles.itineraryCard, { width: '100%', marginBottom: 12 }]}>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.sparkleIconContainer}>
+                      <Ionicons name="map" size={16} color="#2260FF" />
+                    </View>
+                    <Text style={styles.cardTitle}>Trip Summary</Text>
+                  </View>
+                  <Text style={styles.itineraryDesc}>
+                    <Text style={{fontWeight: '700'}}>{itin?.tripSummary?.from || 'Unknown'}</Text> to <Text style={{fontWeight: '700'}}>{itin?.tripSummary?.destination || 'Unknown'}</Text>{"\n"}
+                    {itin?.tripSummary?.days || 0} Days • {itin?.tripSummary?.people || 0} People{"\n"}
+                    Total Budget: {cur} {itin?.tripSummary?.budget || 0}
+                  </Text>
+                  
+                  {/* Transport & Hotel */}
+                  <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 12 }}>
+                    <Text style={[styles.itineraryTitle, { marginBottom: 4 }]}>Transport & Stay</Text>
+                    <Text style={styles.itineraryDesc}>
+                      🚗 {itin?.transport?.type || 'Not provided'} ({itin?.transport?.status || 'Unknown'}) - {cur} {itin?.transport?.estimatedCost || 'N/A'}{"\n"}
+                      🏨 {itin?.hotel?.name || 'Not provided'} ({itin?.hotel?.status || 'Unknown'}) - {cur} {itin?.hotel?.estimatedCost || 'N/A'}
+                    </Text>
+                  </View>
 
-        {/* User Message */}
-        <View style={styles.userMessageContainer}>
-          <View style={styles.userMessageBubble}>
-            <Text style={styles.userMessageText}>
-              Plan a 3 day trip to Manali for couple with a budget of ₹15,000 including stay and sightseeing.
-            </Text>
-          </View>
-          <View style={styles.timestampRightContainer}>
-            <Text style={styles.timestampRight}>9:31 AM</Text>
-            <Ionicons name="checkmark-done" size={14} color="#3b82f6" />
-          </View>
-        </View>
-
-        {/* AI Itinerary Card */}
-        <View style={styles.itineraryCardContainer}>
-          <View style={styles.itineraryCard}>
-            
-            <View style={styles.cardHeader}>
-              <View style={styles.cardHeaderLeft}>
-                <View style={styles.sparkleIconContainer}>
-                  <Ionicons name="sparkles" size={16} color="#2260FF" />
+                  {/* Budget Breakdown */}
+                  <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 12 }}>
+                    <Text style={[styles.itineraryTitle, { marginBottom: 4 }]}>Estimated Budget Breakdown</Text>
+                    <Text style={styles.itineraryDesc}>
+                      Transport: {cur} {itin?.budgetBreakdown?.transport || 0}{"\n"}
+                      Hotel: {cur} {itin?.budgetBreakdown?.hotel || 0}{"\n"}
+                      Local Travel: {cur} {itin?.budgetBreakdown?.localTransport || 0}{"\n"}
+                      Activities: {cur} {itin?.budgetBreakdown?.activities || 0}{"\n"}
+                      Food: {cur} {itin?.budgetBreakdown?.food || 0}{"\n"}
+                      Buffer: {cur} {itin?.budgetBreakdown?.buffer || 0}{"\n"}
+                      Total: <Text style={{fontWeight: '700', color: '#10B981'}}>{cur} {itin?.budgetBreakdown?.total || 0}</Text>
+                    </Text>
+                  </View>
                 </View>
-                <Text style={styles.cardTitle}>Here's your 3 day trip plan for Manali 🏔️</Text>
+
+                {/* Day by Day Itinerary */}
+                {itin?.days?.map((d: any, idx: number) => (
+                  <View key={`day_${idx}`} style={[styles.itineraryCard, { width: '100%', marginBottom: 12 }]}>
+                    <View style={styles.cardHeader}>
+                      <View style={[styles.sparkleIconContainer, { backgroundColor: '#E8FBF4' }]}>
+                        <Ionicons name="calendar" size={16} color="#10B981" />
+                      </View>
+                      <Text style={styles.cardTitle}>Day {d.day}</Text>
+                    </View>
+                    <View style={styles.itineraryList}>
+                      {d.activities?.map((act: any, actIdx: number) => (
+                        <View key={`act_${actIdx}`} style={[styles.itineraryItem, { alignItems: 'flex-start' }]}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#2260FF', marginRight: 12, marginTop: 6 }} />
+                          <View style={styles.itineraryDetails}>
+                            <Text style={styles.itineraryTitle}>{act.name || 'Activity'}</Text>
+                            <Text style={styles.itineraryDesc}>
+                              {act.startTime || ''} - {act.endTime || ''} {act.duration ? `(${act.duration})` : ''}{"\n"}
+                              {act.location ? `📍 ${act.location}\n` : ''}
+                              {act.description || ''}
+                            </Text>
+                            {act.estimatedCost > 0 && (
+                              <View style={[styles.itineraryDayBadge, { marginTop: 6, backgroundColor: '#FFF3E8' }]}>
+                                <Text style={[styles.itineraryDayText, { color: '#F97316' }]}>Est. Cost: {cur} {act.estimatedCost}</Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ))}
+                
+                {msg.timestamp && <Text style={styles.timestampLeft}>{msg.timestamp}</Text>}
               </View>
-              <TouchableOpacity>
-                <Ionicons name="bookmark-outline" size={20} color="#2260FF" />
-              </TouchableOpacity>
-            </View>
-            
-            <Text style={styles.cardSubtitle}>
-              A perfect blend of adventure, romance and relaxation within your budget of ₹15,000.
-            </Text>
-
-            <View style={styles.itineraryList}>
-              <ItineraryItem 
-                day="Day 1" 
-                title="Arrival & Local Sightseeing" 
-                desc="Mall Road, Hadimba Temple, Old Manali\nEvening at riverside cafes" 
-                image={require('../../assets/season_manali.png')} 
-                icon="map-outline"
-              />
-              <ItineraryItem 
-                day="Day 2" 
-                title="Solang Valley Adventure" 
-                desc="Solang Valley, ATV ride, Ropeway\nVisit to Vashisht Hot Springs" 
-                image={require('../../assets/trip_kashmir.png')} 
-                icon="snow-outline"
-              />
-              <ItineraryItem 
-                day="Day 3" 
-                title="Scenic Views & Departure" 
-                desc="Visit Jogini Waterfall, Tibetan Monastery\nShopping & Departure" 
-                image={require('../../assets/season_udaipur.png')} 
-                icon="airplane-outline"
-              />
-            </View>
-
-            <View style={styles.cardFooter}>
-              <View style={styles.footerBlock}>
-                <View style={styles.footerIconGreen}>
-                  <Ionicons name="shield-checkmark-outline" size={16} color="#10B981" />
+            );
+          } else if (msg.sender === 'ai') {
+            return (
+              <View key={msg.id} style={styles.aiMessageContainer}>
+                <View style={styles.aiMessageBubble}>
+                  <Text style={styles.aiMessageTitle}>👋 Hi Explorer!</Text>
+                  <Text style={styles.aiMessageText}>{msg.text}</Text>
                 </View>
-                <View>
-                  <Text style={styles.footerLabel}>Estimated Budget</Text>
-                  <Text style={styles.footerValueGreen}>₹14,500</Text>
+                {msg.timestamp && <Text style={styles.timestampLeft}>{msg.timestamp}</Text>}
+              </View>
+            );
+          } else {
+            return (
+              <View key={msg.id} style={styles.userMessageContainer}>
+                <View style={styles.userMessageBubble}>
+                  <Text style={styles.userMessageText}>{msg.text}</Text>
+                </View>
+                <View style={styles.timestampRightContainer}>
+                  {msg.timestamp && <Text style={styles.timestampRight}>{msg.timestamp}</Text>}
+                  <Ionicons name="checkmark-done" size={14} color="#3b82f6" />
                 </View>
               </View>
-              
-              <View style={styles.footerDivider} />
-              
-              <View style={styles.footerBlock}>
-                <View style={styles.footerIconOrange}>
-                  <Ionicons name="star-outline" size={16} color="#F97316" />
-                </View>
-                <View>
-                  <Text style={styles.footerLabel}>Best Time to Visit</Text>
-                  <Text style={styles.footerValueOrange}>Mar - Jun, Sep - Feb</Text>
-                </View>
-              </View>
-            </View>
+            );
+          }
+        })}
 
+        {isLoading && (
+          <View style={styles.aiMessageContainer}>
+            <View style={[styles.aiMessageBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+              <ActivityIndicator size="small" color="#2260FF" />
+              <Text style={styles.aiMessageText}>Thinking...</Text>
+            </View>
           </View>
-          <Text style={styles.timestampLeft}>9:32 AM</Text>
-        </View>
+        )}
 
         {/* Suggestions */}
         <View style={styles.suggestionsContainer}>
@@ -144,26 +348,32 @@ export const AIPage = ({ session, onNavigate }: any) => {
       </ScrollView>
 
       {/* Floating Input Area */}
-      <View style={styles.inputContainerWrapper}>
-        <View style={styles.inputContainer}>
-          <View style={styles.inputSparkle}>
-            <Ionicons name="sparkles" size={16} color="#2260FF" />
+      {isAIActive && (
+        <View style={styles.inputContainerWrapper}>
+          <View style={styles.inputContainer}>
+            <View style={styles.inputSparkle}>
+              <Ionicons name="sparkles" size={16} color="#2260FF" />
+            </View>
+            <TextInput 
+              style={styles.textInput}
+              placeholder="Ask anything about your trip..."
+              placeholderTextColor="#9CA3AF"
+              value={inputText}
+              onChangeText={setInputText}
+              onSubmitEditing={handleSend}
+            />
+            <TouchableOpacity style={styles.attachButton}>
+              <Feather name="paperclip" size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
+              <Feather name="arrow-right" size={18} color="#ffffff" />
+            </TouchableOpacity>
           </View>
-          <TextInput 
-            style={styles.textInput}
-            placeholder="Ask anything about your trip..."
-            placeholderTextColor="#9CA3AF"
-          />
-          <TouchableOpacity style={styles.attachButton}>
-            <Feather name="paperclip" size={20} color="#9CA3AF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.sendButton}>
-            <Feather name="arrow-right" size={18} color="#ffffff" />
-          </TouchableOpacity>
         </View>
-      </View>
+      )}
 
       <BottomNav activeTab="Trip Planner AI" onNavigate={onNavigate} />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
