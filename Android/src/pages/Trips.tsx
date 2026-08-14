@@ -27,6 +27,8 @@ export const Trips = ({ session, onNavigate }: any) => {
     };
     fetchTrips();
   }, []);
+
+  return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>

@@ -4,6 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BottomNav } from '../components/BottomNav';
 import { supabase } from '../lib/supabase';
+import { AssetMap } from '../lib/assets';
+
 export const AIPage = ({ session, onNavigate }: any) => {
   const scrollViewRef = useRef<ScrollView>(null);
   const [isAIActive, setIsAIActive] = useState(true);
@@ -14,15 +16,16 @@ export const AIPage = ({ session, onNavigate }: any) => {
       sender: 'ai',
       title: '👋 Hi Explorer!',
       text: 'Hi, I am here for you to plan a new journey.',
-      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     },
     {
       id: 'initial_2',
       sender: 'ai',
       text: 'Where are you travelling from?',
-      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
+
   const [isLoading, setIsLoading] = useState(false);
   const isSendingRef = useRef(false);
 
@@ -32,16 +35,21 @@ export const AIPage = ({ session, onNavigate }: any) => {
     toLocation: '',
     budget: 0,
     currency: 'INR',
-    numberOfPeople: 0,
-    numberOfDays: 0
+    numberOfPeople: 1,
+    numberOfDays: 1,
   });
 
-  // Scroll to bottom when a new message is added
+  const [isPlanning, setIsPlanning] = useState(false);
+  const [planningText, setPlanningText] = useState('Planning your journey...');
+  const [generatedPlan, setGeneratedPlan] = useState<any>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+
+  // Auto-scroll to bottom on messages/plan changes
   useEffect(() => {
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  }, [messages]);
+    }, 150);
+  }, [messages, isPlanning, generatedPlan, planError]);
 
   const addAIMessage = (text: string, title?: string) => {
     setMessages(prev => [...prev, {
@@ -49,13 +57,101 @@ export const AIPage = ({ session, onNavigate }: any) => {
       sender: 'ai',
       title: title,
       text: text,
-      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }]);
+  };
+
+  const triggerTripPlanning = async (details: typeof tripDetails) => {
+    if (isPlanning) return;
+    setIsPlanning(true);
+    setPlanningText('Planning your journey...');
+    setPlanError(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('trip-ai', {
+        body: {
+          fromLocation: details.fromLocation,
+          toLocation: details.toLocation,
+          budget: details.budget,
+          currency: details.currency || 'INR',
+          numberOfPeople: details.numberOfPeople,
+          numberOfDays: details.numberOfDays,
+        }
+      });
+
+      if (error || !data || !data.success || !data.plan) {
+        throw new Error(data?.error || "Failed to generate plan");
+      }
+
+      setGeneratedPlan(data.plan);
+      addAIMessage(
+        data.message || `I've crafted your complete ${details.numberOfDays}-day verified trip plan from ${details.fromLocation} to ${details.toLocation}! Here are your journey details.`,
+        `🎉 Verified Trip Plan Ready`
+      );
+    } catch (err: any) {
+      console.warn("Trip planning error:", err);
+      setPlanError("Sorry, I couldn't create your trip plan right now. Please try again.");
+      addAIMessage(
+        "Sorry, I couldn't create your trip plan right now. Please try again.",
+        "⚠️ Planning Failed"
+      );
+    } finally {
+      setIsPlanning(false);
+    }
+  };
+
+  const triggerPlanModification = async (modificationText: string) => {
+    if (isPlanning || !generatedPlan) return;
+    setIsPlanning(true);
+    setPlanningText(`Applying change: "${modificationText}"...`);
+    setPlanError(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('trip-ai', {
+        body: {
+          requirements: tripDetails,
+          currentPlan: generatedPlan,
+          modification: modificationText,
+        }
+      });
+
+      if (error || !data || !data.success || !data.plan) {
+        throw new Error(data?.error || "Failed to modify plan");
+      }
+
+      setGeneratedPlan(data.plan);
+      if (data.requirements) {
+        setTripDetails(prev => ({
+          ...prev,
+          budget: data.requirements.budget || prev.budget,
+        }));
+      }
+
+      addAIMessage(
+        data.message || `I've updated your trip plan based on your request: "${modificationText}".`,
+        `✨ Plan Updated`
+      );
+    } catch (err: any) {
+      console.warn("Plan modification error:", err);
+      setPlanError("Sorry, I couldn't update your trip plan right now. Please try again.");
+      addAIMessage(
+        "Sorry, I couldn't adjust your trip plan with that request. Please try again.",
+        "⚠️ Update Failed"
+      );
+    } finally {
+      setIsPlanning(false);
+    }
   };
 
   const processAnswer = (answer: string) => {
     setIsLoading(false);
     const cleanAnswer = answer.trim();
+
+    // If plan is already generated, process as conversational modification
+    if (currentStep === 'done' && generatedPlan) {
+      triggerPlanModification(cleanAnswer);
+      return;
+    }
 
     switch (currentStep) {
       case 'fromLocation':
@@ -67,7 +163,7 @@ export const AIPage = ({ session, onNavigate }: any) => {
           addAIMessage("Where do you want to go?");
         }
         break;
-      
+
       case 'toLocation':
         if (!cleanAnswer) {
           addAIMessage("Please enter a valid destination. Where do you want to go?");
@@ -90,18 +186,15 @@ export const AIPage = ({ session, onNavigate }: any) => {
         } else {
           num = parseFloat(budgetVal);
         }
-        
+
         if (isNaN(num) || num <= 0) {
           addAIMessage("Please enter a valid positive number for your budget (e.g., 15000 or 15k). What is your total budget?");
         } else {
           let currency = 'INR';
-          const symbolMatch = cleanAnswer.match(/^([^0-9\s]+)/);
-          if (symbolMatch && symbolMatch[1]) {
-            currency = symbolMatch[1];
-          } else if (cleanAnswer.toLowerCase().includes('inr') || cleanAnswer.includes('₹')) {
-            currency = '₹';
+          if (cleanAnswer.toLowerCase().includes('inr') || cleanAnswer.includes('₹')) {
+            currency = 'INR';
           } else if (cleanAnswer.toLowerCase().includes('usd') || cleanAnswer.includes('$')) {
-            currency = '$';
+            currency = 'USD';
           }
           setTripDetails(prev => ({ ...prev, budget: num, currency: currency }));
           setCurrentStep('numberOfPeople');
@@ -133,20 +226,22 @@ export const AIPage = ({ session, onNavigate }: any) => {
         if (isNaN(days) || days <= 0) {
           addAIMessage("Please enter a valid number of days. How many days do you want to travel?");
         } else {
-          setTripDetails(prev => ({ ...prev, numberOfDays: days }));
+          const finalTrip = { ...tripDetails, numberOfDays: days };
+          setTripDetails(finalTrip);
           setCurrentStep('done');
-          addAIMessage("Great! I have all the basic details. Let me plan your journey.");
+          addAIMessage("Got all your requirements! Contacting verified travel sources to build your journey...", "✨ Planning Trip");
+          triggerTripPlanning(finalTrip);
         }
         break;
-        
+
       case 'done':
-        addAIMessage("Great! I have all the basic details. Let me plan your journey.");
+        triggerPlanModification(cleanAnswer);
         break;
     }
   };
 
   const handleSend = () => {
-    if (isLoading || isSendingRef.current) return;
+    if (isLoading || isSendingRef.current || isPlanning) return;
     const text = inputText.trim();
     if (!text) return;
 
@@ -154,7 +249,7 @@ export const AIPage = ({ session, onNavigate }: any) => {
       id: Date.now().toString(),
       sender: 'user',
       text: text,
-      timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
     isSendingRef.current = true;
@@ -165,145 +260,445 @@ export const AIPage = ({ session, onNavigate }: any) => {
     setTimeout(() => {
       isSendingRef.current = false;
       processAnswer(text);
-    }, 1000);
+    }, 500);
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.iconButton} onPress={() => onNavigate?.('Dashboard')}>
-          <Feather name="chevron-left" size={24} color="#0d1b2a" />
-        </TouchableOpacity>
-        
-        <View style={styles.headerCenter}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.robotAvatar}>
-              <MaterialCommunityIcons name="robot" size={22} color="#2260FF" />
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => onNavigate?.('Dashboard')}>
+            <Feather name="chevron-left" size={24} color="#0d1b2a" />
+          </TouchableOpacity>
+
+          <View style={styles.headerCenter}>
+            <View style={styles.avatarContainer}>
+              <View style={styles.robotAvatar}>
+                <MaterialCommunityIcons name="robot" size={22} color="#2260FF" />
+              </View>
+              <View style={styles.onlineDot} />
             </View>
-            <View style={styles.onlineDot} />
+            <View>
+              <Text style={styles.headerTitle}>Trip Planner AI</Text>
+              <Text style={styles.headerSubtitle}>Verified travel intelligence</Text>
+            </View>
           </View>
-          <View>
-            <Text style={styles.headerTitle}>Trip Planner AI</Text>
-            <Text style={styles.headerSubtitle}>Your smart travel companion</Text>
-          </View>
+
+          <TouchableOpacity style={styles.iconButton}>
+            <Feather name="clock" size={20} color="#0d1b2a" />
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.iconButton}>
-          <Feather name="clock" size={20} color="#0d1b2a" />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView 
-        ref={scrollViewRef}
-        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({animated: true})}
-        showsVerticalScrollIndicator={false} 
-        contentContainerStyle={styles.scrollContent}
-      >
-        
-        {messages.map((msg: any) => {
-          if (msg.sender === 'ai') {
-            return (
-              <View key={msg.id} style={styles.aiMessageContainer}>
-                <View style={styles.aiMessageBubble}>
-                  {msg.title ? (
-                    <Text style={styles.aiMessageTitle}>{msg.title}</Text>
-                  ) : null}
-                  <Text style={styles.aiMessageText}>{msg.text}</Text>
+        <ScrollView
+          ref={scrollViewRef}
+          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {/* Chat Messages */}
+          {messages.map((msg: any) => {
+            if (msg.sender === 'ai') {
+              return (
+                <View key={msg.id} style={styles.aiMessageContainer}>
+                  <View style={styles.aiMessageBubble}>
+                    {msg.title ? (
+                      <Text style={styles.aiMessageTitle}>{msg.title}</Text>
+                    ) : null}
+                    <Text style={styles.aiMessageText}>{msg.text}</Text>
+                  </View>
+                  {msg.timestamp && <Text style={styles.timestampLeft}>{msg.timestamp}</Text>}
                 </View>
-                {msg.timestamp && <Text style={styles.timestampLeft}>{msg.timestamp}</Text>}
-              </View>
-            );
-          } else if (msg.sender === 'user') {
-            return (
-              <View key={msg.id} style={styles.userMessageContainer}>
-                <View style={styles.userMessageBubble}>
-                  <Text style={styles.userMessageText}>{msg.text}</Text>
+              );
+            } else if (msg.sender === 'user') {
+              return (
+                <View key={msg.id} style={styles.userMessageContainer}>
+                  <View style={styles.userMessageBubble}>
+                    <Text style={styles.userMessageText}>{msg.text}</Text>
+                  </View>
+                  <View style={styles.timestampRightContainer}>
+                    {msg.timestamp && <Text style={styles.timestampRight}>{msg.timestamp}</Text>}
+                    <Ionicons name="checkmark-done" size={14} color="#3b82f6" />
+                  </View>
                 </View>
-                <View style={styles.timestampRightContainer}>
-                  {msg.timestamp && <Text style={styles.timestampRight}>{msg.timestamp}</Text>}
-                  <Ionicons name="checkmark-done" size={14} color="#3b82f6" />
-                </View>
-              </View>
-            );
-          } else {
+              );
+            }
             return null;
-          }
-        })}
+          })}
 
-        {isLoading && (
-          <View style={styles.aiMessageContainer}>
-            <View style={[styles.aiMessageBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
-              <ActivityIndicator size="small" color="#2260FF" />
-              <Text style={styles.aiMessageText}>Thinking...</Text>
+          {/* Quick Chat Input Loader */}
+          {isLoading && (
+            <View style={styles.aiMessageContainer}>
+              <View style={[styles.aiMessageBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                <ActivityIndicator size="small" color="#2260FF" />
+                <Text style={styles.aiMessageText}>Thinking...</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Planning / Modifying Loader Card */}
+          {isPlanning && (
+            <View style={styles.planningCard}>
+              <ActivityIndicator size="large" color="#2260FF" style={{ marginBottom: 12 }} />
+              <Text style={styles.planningTitle}>{planningText}</Text>
+              <Text style={styles.planningSubtitle}>
+                Validating routes, checking database rates, and updating itinerary.
+              </Text>
+            </View>
+          )}
+
+          {/* Error Banner with Retry */}
+          {planError && !isPlanning && (
+            <View style={styles.errorCard}>
+              <View style={styles.errorHeader}>
+                <Ionicons name="alert-circle-outline" size={22} color="#EF4444" />
+                <Text style={styles.errorTitle}>Planning Issue</Text>
+              </View>
+              <Text style={styles.errorDesc}>{planError}</Text>
+              <TouchableOpacity
+                style={styles.retryButton}
+                activeOpacity={0.8}
+                onPress={() => triggerTripPlanning(tripDetails)}
+              >
+                <Ionicons name="refresh-outline" size={16} color="#ffffff" />
+                <Text style={styles.retryButtonText}>Retry Planning</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ==================================================================== */}
+          {/* ACTUAL GENERATED TRIP PLAN (Rendered strictly from Backend Response)  */}
+          {/* ==================================================================== */}
+          {generatedPlan && (
+            <View style={styles.itineraryCardContainer}>
+              {/* 1. Trip Summary Header */}
+              <View style={styles.itineraryCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardHeaderLeft}>
+                    <View style={styles.sparkleIconContainer}>
+                      <Ionicons name="sparkles" size={18} color="#2260FF" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cardTitle}>
+                        {generatedPlan.tripSummary.fromLocation} to {generatedPlan.tripSummary.toLocation}
+                      </Text>
+                      <Text style={styles.cardSubtitle}>
+                        {generatedPlan.tripSummary.numberOfDays} Days • {generatedPlan.tripSummary.numberOfPeople} Traveler(s)
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Summary Pills */}
+                <View style={styles.summaryPillsRow}>
+                  <View style={styles.summaryPill}>
+                    <Ionicons name="wallet-outline" size={14} color="#2260FF" />
+                    <Text style={styles.summaryPillLabel}>Budget:</Text>
+                    <Text style={styles.summaryPillValue}>
+                      {generatedPlan.tripSummary.currency} {generatedPlan.tripSummary.budget.toLocaleString()}
+                    </Text>
+                  </View>
+                  <View style={styles.summaryPill}>
+                    <Ionicons name="calculator-outline" size={14} color="#10B981" />
+                    <Text style={styles.summaryPillLabel}>Known Total:</Text>
+                    <Text style={[styles.summaryPillValue, { color: '#10B981' }]}>
+                      {generatedPlan.tripSummary.currency} {generatedPlan.budget.knownTotal.toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* 2. Transport Section */}
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="airplane-outline" size={18} color="#2260FF" />
+                  <Text style={styles.sectionHeading}>Transport</Text>
+                </View>
+                {generatedPlan.transport?.selected ? (
+                  <View style={styles.planCard}>
+                    <View style={styles.planCardTop}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.planCardTitle}>
+                          {generatedPlan.transport.provider ? `${generatedPlan.transport.provider} ` : ''}
+                          {generatedPlan.transport.type?.toUpperCase()}
+                        </Text>
+                        <Text style={styles.planCardSub}>
+                          {generatedPlan.tripSummary.fromLocation} → {generatedPlan.tripSummary.toLocation}
+                        </Text>
+                      </View>
+                      <Text style={styles.planPrice}>
+                        {generatedPlan.tripSummary.currency} {generatedPlan.transport.price?.toLocaleString()}
+                      </Text>
+                    </View>
+                    {generatedPlan.transport.duration ? (
+                      <Text style={styles.planMetaText}>
+                        Duration: {generatedPlan.transport.duration}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : (
+                  <View style={styles.emptyOptionCard}>
+                    <Text style={styles.emptyOptionText}>Transport option not available in database</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 3. Hotel Section */}
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="business-outline" size={18} color="#8B5CF6" />
+                  <Text style={styles.sectionHeading}>Accommodation</Text>
+                </View>
+                {generatedPlan.hotel?.selected ? (
+                  <View style={styles.planCard}>
+                    <View style={styles.planCardTop}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.planCardTitle}>{generatedPlan.hotel.name}</Text>
+                        <Text style={styles.planCardSub}>{generatedPlan.hotel.location}</Text>
+                      </View>
+                      {generatedPlan.hotel.rating ? (
+                        <View style={styles.ratingBadge}>
+                          <Ionicons name="star" size={12} color="#F59E0B" />
+                          <Text style={styles.ratingText}>{generatedPlan.hotel.rating}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.hotelPriceRow}>
+                      <Text style={styles.hotelPerNight}>
+                        {generatedPlan.tripSummary.currency} {generatedPlan.hotel.pricePerNight?.toLocaleString()} / night ({generatedPlan.hotel.numberOfNights} nights)
+                      </Text>
+                      <Text style={styles.planPrice}>
+                        {generatedPlan.tripSummary.currency} {generatedPlan.hotel.totalPrice?.toLocaleString()}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.emptyOptionCard}>
+                    <Text style={styles.emptyOptionText}>Suitable hotel not available in database</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 4. Vehicle Section (If Selected) */}
+              {generatedPlan.vehicle?.selected ? (
+                <View style={styles.sectionBlock}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Ionicons name="car-outline" size={18} color="#F97316" />
+                    <Text style={styles.sectionHeading}>Rental Vehicle</Text>
+                  </View>
+                  <View style={styles.planCard}>
+                    <View style={styles.planCardTop}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.planCardTitle}>{generatedPlan.vehicle.name}</Text>
+                        <Text style={styles.planCardSub}>{generatedPlan.vehicle.type}</Text>
+                      </View>
+                      <Text style={styles.planPrice}>
+                        {generatedPlan.tripSummary.currency} {generatedPlan.vehicle.totalPrice?.toLocaleString()}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* 5. Suggested Places (From Destinations table) */}
+              {generatedPlan.suggestedPlaces && generatedPlan.suggestedPlaces.length > 0 ? (
+                <View style={styles.sectionBlock}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Ionicons name="location-outline" size={18} color="#10B981" />
+                    <Text style={styles.sectionHeading}>Suggested Attractions</Text>
+                  </View>
+                  <View style={styles.suggestedList}>
+                    {generatedPlan.suggestedPlaces.map((place: any, index: number) => (
+                      <View key={index} style={styles.placeCard}>
+                        <View style={styles.placeCardLeft}>
+                          <View style={styles.placeNumberBadge}>
+                            <Text style={styles.placeNumberText}>{index + 1}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.placeTitle}>{place.title}</Text>
+                            {place.reason ? (
+                              <Text style={styles.placeReason}>{place.reason}</Text>
+                            ) : null}
+                            <View style={styles.placeMetaRow}>
+                              {place.distance ? (
+                                <Text style={styles.placeDistance}>{place.distance}</Text>
+                              ) : null}
+                              {place.rating ? (
+                                <Text style={styles.placeRating}>★ {place.rating}</Text>
+                              ) : null}
+                              <Text style={styles.unverifiedTag}>Entry fee unverified</Text>
+                            </View>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              {/* 6. Day-by-Day Itinerary */}
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="calendar-outline" size={18} color="#2260FF" />
+                  <Text style={styles.sectionHeading}>Day-by-Day Itinerary</Text>
+                </View>
+                {generatedPlan.days?.map((dayObj: any, dIdx: number) => (
+                  <View key={dIdx} style={styles.dayCard}>
+                    <View style={styles.dayBadgeHeader}>
+                      <Text style={styles.dayBadgeText}>Day {dayObj.day || dIdx + 1}</Text>
+                    </View>
+                    <View style={styles.activitiesContainer}>
+                      {dayObj.activities && dayObj.activities.length > 0 ? (
+                        dayObj.activities.map((act: any, aIdx: number) => (
+                          <View key={aIdx} style={styles.activityRow}>
+                            <View style={styles.activityDot} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.activityTitle}>{act.title}</Text>
+                              {act.reason ? (
+                                <Text style={styles.activityReason}>{act.reason}</Text>
+                              ) : null}
+                              {act.startTime || act.duration ? (
+                                <Text style={styles.activityTime}>
+                                  {act.startTime ? `${act.startTime} ` : ''}
+                                  {act.duration ? `(${act.duration})` : ''}
+                                </Text>
+                              ) : null}
+                            </View>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.noActivitiesText}>Open exploration & leisure</Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              {/* 7. Authoritative Server Budget Overview */}
+              <View style={styles.budgetOverviewCard}>
+                <Text style={styles.budgetCardHeading}>Server Budget Summary</Text>
+                <View style={styles.budgetRow}>
+                  <Text style={styles.budgetRowLabel}>Total Allocated Budget:</Text>
+                  <Text style={styles.budgetRowVal}>
+                    {generatedPlan.tripSummary.currency} {generatedPlan.tripSummary.budget.toLocaleString()}
+                  </Text>
+                </View>
+                <View style={styles.budgetRow}>
+                  <Text style={styles.budgetRowLabel}>Verified Known Total:</Text>
+                  <Text style={[styles.budgetRowVal, { color: '#10B981' }]}>
+                    {generatedPlan.tripSummary.currency} {generatedPlan.budget.knownTotal.toLocaleString()}
+                  </Text>
+                </View>
+                <View style={styles.budgetRow}>
+                  <Text style={styles.budgetRowLabel}>Remaining Known Buffer:</Text>
+                  <Text style={[styles.budgetRowVal, { color: '#2260FF' }]}>
+                    {generatedPlan.tripSummary.currency} {generatedPlan.budget.remainingKnownBudget.toLocaleString()}
+                  </Text>
+                </View>
+                <Text style={styles.budgetNotice}>
+                  * Calculated strictly from verified database rates. Unverified meals or incidental activity fees are not included.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Contextual Suggestion Pills */}
+          <View style={styles.suggestionsContainer}>
+            <Text style={styles.suggestionsTitle}>
+              {generatedPlan ? "Modify your trip plan with AI" : "You can also try asking"}
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
+              {generatedPlan ? (
+                <>
+                  <SuggestionPill
+                    icon="trending-down-outline"
+                    iconColor="#10B981"
+                    text="Make it cheaper"
+                    onPress={() => triggerPlanModification("Make it cheaper")}
+                  />
+                  <SuggestionPill
+                    icon="business-outline"
+                    iconColor="#8B5CF6"
+                    text="Change the hotel"
+                    onPress={() => triggerPlanModification("Change the hotel")}
+                  />
+                  <SuggestionPill
+                    icon="close-circle-outline"
+                    iconColor="#EF4444"
+                    text="I don't want a car"
+                    onPress={() => triggerPlanModification("I don't want a car")}
+                  />
+                  <SuggestionPill
+                    icon="leaf-outline"
+                    iconColor="#0D9488"
+                    text="Add more nature places"
+                    onPress={() => triggerPlanModification("Add more nature places")}
+                  />
+                  <SuggestionPill
+                    icon="heart-outline"
+                    iconColor="#EC4899"
+                    text="Give me a relaxed itinerary"
+                    onPress={() => triggerPlanModification("Give me a relaxed itinerary")}
+                  />
+                </>
+              ) : (
+                <>
+                  <SuggestionPill icon="image-outline" iconColor="#10B981" text="Best waterfalls near Manali" />
+                  <SuggestionPill icon="business-outline" iconColor="#8B5CF6" text="Budget hotels in Goa" />
+                  <SuggestionPill icon="restaurant-outline" iconColor="#F97316" text="Top cafes in Jaipur" />
+                  <SuggestionPill icon="car-outline" iconColor="#3b82f6" text="How to reach Udaipur?" />
+                </>
+              )}
+            </ScrollView>
+          </View>
+
+          <View style={{ height: 110 }} />
+        </ScrollView>
+
+        {/* Floating Input Area - Remains active for conversational modifications */}
+        {isAIActive && (
+          <View style={styles.inputContainerWrapper}>
+            <View style={styles.inputContainer}>
+              <View style={styles.inputSparkle}>
+                <Ionicons name="sparkles" size={16} color="#2260FF" />
+              </View>
+              <TextInput
+                style={styles.textInput}
+                placeholder={
+                  generatedPlan
+                    ? "Ask to modify (e.g. 'make it cheaper', 'change hotel')..."
+                    : currentStep === 'done'
+                    ? "Trip requirements collected..."
+                    : "Type your answer..."
+                }
+                placeholderTextColor="#9CA3AF"
+                value={inputText}
+                onChangeText={setInputText}
+                onSubmitEditing={handleSend}
+                editable={!isPlanning}
+              />
+              <TouchableOpacity style={styles.attachButton}>
+                <Feather name="paperclip" size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sendButton, isPlanning && { opacity: 0.5 }]}
+                onPress={handleSend}
+                disabled={isPlanning}
+              >
+                <Feather name="arrow-right" size={18} color="#ffffff" />
+              </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* Suggestions */}
-        <View style={styles.suggestionsContainer}>
-          <Text style={styles.suggestionsTitle}>You can also try asking</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
-            <SuggestionPill icon="image-outline" iconColor="#10B981" text="Best waterfalls near Manali" />
-            <SuggestionPill icon="business-outline" iconColor="#8B5CF6" text="Budget hotels in Manali" />
-            <SuggestionPill icon="restaurant-outline" iconColor="#F97316" text="Top cafes in Old Manali" />
-            <SuggestionPill icon="car-outline" iconColor="#3b82f6" text="How to reach Manali?" />
-          </ScrollView>
-        </View>
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
-
-      {/* Floating Input Area */}
-      {isAIActive && (
-        <View style={styles.inputContainerWrapper}>
-          <View style={styles.inputContainer}>
-            <View style={styles.inputSparkle}>
-              <Ionicons name="sparkles" size={16} color="#2260FF" />
-            </View>
-            <TextInput 
-              style={styles.textInput}
-              placeholder="Ask anything about your trip..."
-              placeholderTextColor="#9CA3AF"
-              value={inputText}
-              onChangeText={setInputText}
-              onSubmitEditing={handleSend}
-            />
-            <TouchableOpacity style={styles.attachButton}>
-              <Feather name="paperclip" size={20} color="#9CA3AF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
-              <Feather name="arrow-right" size={18} color="#ffffff" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      <BottomNav activeTab="Trip Planner AI" onNavigate={onNavigate} />
+        <BottomNav activeTab="Trip Planner AI" onNavigate={onNavigate} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
 
-const ItineraryItem = ({ day, title, desc, image, icon }: any) => (
-  <View style={styles.itineraryItem}>
-    <Image source={image} style={styles.itineraryImage} />
-    <View style={styles.itineraryDetails}>
-      <View style={styles.itineraryDayBadge}>
-        <Text style={styles.itineraryDayText}>{day}</Text>
-      </View>
-      <Text style={styles.itineraryTitle}>{title}</Text>
-      <Text style={styles.itineraryDesc}>{desc}</Text>
-    </View>
-    <View style={styles.itineraryActionIcon}>
-      <Ionicons name={icon} size={18} color="#2260FF" />
-    </View>
-  </View>
-);
-
-const SuggestionPill = ({ icon, iconColor, text }: any) => (
-  <TouchableOpacity style={styles.suggestionPill} activeOpacity={0.7}>
+const SuggestionPill = ({ icon, iconColor, text, onPress }: any) => (
+  <TouchableOpacity style={styles.suggestionPill} activeOpacity={0.7} onPress={onPress}>
     <Ionicons name={icon} size={16} color={iconColor} />
     <Text style={styles.suggestionText}>{text}</Text>
   </TouchableOpacity>
@@ -385,7 +780,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 16,
     borderTopLeftRadius: 4,
-    maxWidth: '80%',
+    maxWidth: '85%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
@@ -415,7 +810,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   userMessageBubble: {
-    backgroundColor: '#3b66f5', // Blue color matching design
+    backgroundColor: '#3b66f5',
     padding: 16,
     borderRadius: 16,
     borderBottomRightRadius: 4,
@@ -437,16 +832,85 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9CA3AF',
   },
-  // AI Itinerary Card
+  // Planning Loading Card
+  planningCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    marginBottom: 20,
+    shadowColor: '#2260FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  planningTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0d1b2a',
+    marginBottom: 6,
+  },
+  planningSubtitle: {
+    fontSize: 12,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  // Error Banner
+  errorCard: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  errorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  errorTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  errorDesc: {
+    fontSize: 12,
+    color: '#B91C1C',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DC2626',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    gap: 6,
+    alignSelf: 'flex-start',
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  // Itinerary Container & Card
   itineraryCardContainer: {
+    marginTop: 8,
     marginBottom: 24,
+    gap: 16,
   },
   itineraryCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
     elevation: 2,
@@ -455,133 +919,293 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   cardHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     flex: 1,
-    paddingRight: 16,
   },
   sparkleIconContainer: {
     backgroundColor: '#EDF5FF',
-    padding: 6,
+    padding: 8,
     borderRadius: 12,
-    marginRight: 12,
+    marginRight: 10,
   },
   cardTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
     color: '#0d1b2a',
-    flex: 1,
-    lineHeight: 20,
+    marginBottom: 2,
   },
   cardSubtitle: {
     fontSize: 12,
     color: '#64748b',
-    lineHeight: 18,
-    marginBottom: 20,
   },
-  itineraryList: {
-    gap: 16,
-    marginBottom: 20,
-  },
-  itineraryItem: {
+  summaryPillsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    paddingTop: 12,
   },
-  itineraryImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    marginRight: 12,
-  },
-  itineraryDetails: {
+  summaryPill: {
     flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 10,
   },
-  itineraryDayBadge: {
-    backgroundColor: '#EDF5FF',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-    marginBottom: 4,
-  },
-  itineraryDayText: {
+  summaryPillLabel: {
     fontSize: 10,
-    fontWeight: '700',
-    color: '#2260FF',
+    color: '#64748b',
+    marginTop: 2,
   },
-  itineraryTitle: {
+  summaryPillValue: {
     fontSize: 13,
     fontWeight: '700',
     color: '#0d1b2a',
-    marginBottom: 2,
+    marginTop: 2,
   },
-  itineraryDesc: {
+  // Sections
+  sectionBlock: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  sectionHeading: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0d1b2a',
+  },
+  planCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 12,
+  },
+  planCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  planCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0d1b2a',
+  },
+  planCardSub: {
     fontSize: 11,
     color: '#64748b',
-    lineHeight: 16,
+    marginTop: 2,
   },
-  itineraryActionIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#EDF5FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 12,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    paddingTop: 16,
-  },
-  footerBlock: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  footerIconGreen: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#E8FBF4',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  footerLabel: {
-    fontSize: 10,
-    color: '#9CA3AF',
-    marginBottom: 2,
-  },
-  footerValueGreen: {
+  planPrice: {
     fontSize: 13,
     fontWeight: '700',
     color: '#10B981',
   },
-  footerDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: '#f0f0f0',
-    marginHorizontal: 12,
+  planMetaText: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 6,
   },
-  footerIconOrange: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#FFF3E8',
+  emptyOptionCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  emptyOptionText: {
+    fontSize: 12,
+    color: '#94a3b8',
+    fontStyle: 'italic',
+  },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    gap: 3,
+  },
+  ratingText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#D97706',
+  },
+  hotelPriceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingTop: 8,
+  },
+  hotelPerNight: {
+    fontSize: 11,
+    color: '#64748b',
+  },
+  // Suggested Places List
+  suggestedList: {
+    gap: 8,
+  },
+  placeCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 10,
+  },
+  placeCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  placeNumberBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#E8FBF4',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
   },
-  footerValueOrange: {
+  placeNumberText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#10B981',
+  },
+  placeTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#F97316',
+    color: '#0d1b2a',
+  },
+  placeReason: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  placeMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  placeDistance: {
+    fontSize: 10,
+    color: '#2260FF',
+    fontWeight: '500',
+  },
+  placeRating: {
+    fontSize: 10,
+    color: '#D97706',
+    fontWeight: '600',
+  },
+  unverifiedTag: {
+    fontSize: 9,
+    color: '#94a3b8',
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  // Day by Day
+  dayCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+  },
+  dayBadgeHeader: {
+    backgroundColor: '#EDF5FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  dayBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#2260FF',
+  },
+  activitiesContainer: {
+    gap: 10,
+    paddingLeft: 4,
+  },
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  activityDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#3b82f6',
+    marginTop: 6,
+  },
+  activityTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0d1b2a',
+  },
+  activityReason: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 1,
+  },
+  activityTime: {
+    fontSize: 10,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  noActivitiesText: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontStyle: 'italic',
+  },
+  // Authoritative Budget Overview
+  budgetOverviewCard: {
+    backgroundColor: '#0d1b2a',
+    borderRadius: 16,
+    padding: 16,
+  },
+  budgetCardHeading: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 10,
+  },
+  budgetRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  budgetRowLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+  },
+  budgetRowVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  budgetNotice: {
+    fontSize: 10,
+    color: '#64748b',
+    marginTop: 8,
+    fontStyle: 'italic',
+    lineHeight: 14,
   },
   // Suggestions
   suggestionsContainer: {
@@ -619,7 +1243,7 @@ const styles = StyleSheet.create({
   // Input Area
   inputContainerWrapper: {
     position: 'absolute',
-    bottom: 90, // Above bottom nav
+    bottom: 90,
     left: 16,
     right: 16,
     zIndex: 10,

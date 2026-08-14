@@ -26,6 +26,8 @@ export const ExploreMap = ({ onNavigate }: any) => {
     };
     fetchExploreData();
   }, []);
+
+  return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
