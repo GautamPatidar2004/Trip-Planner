@@ -109,7 +109,7 @@ Rules:
       try {
         console.log('Attempting trip generation with primary provider: Gemini...');
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${geminiApiKey}`,
           {
             method: 'POST',
             headers: {
@@ -234,7 +234,7 @@ Rules:
     if (!responseData) {
       if (groqApiKey) {
         try {
-          console.log('Attempting trip generation with fallback provider: Groq (llama-3.3-70b-versatile)...');
+          console.log('Attempting trip generation with fallback provider: Groq (qwen/qwen3.6-27b)...');
           const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -242,7 +242,7 @@ Rules:
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model: 'llama-3.3-70b-versatile',
+              model: 'qwen/qwen3.6-27b',
               messages: [
                 {
                   role: 'system',

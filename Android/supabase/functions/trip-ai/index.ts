@@ -14,70 +14,108 @@ const corsHeaders = {
 }
 
 async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
+  const modelName = "gemini-3.6-flash";
+  console.log(`[Diagnostic] GEMINI_API_KEY secret loaded: ${!!apiKey}`);
+  console.log(`[Diagnostic] Target model name being called: ${modelName}`);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      }),
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+          },
+        }),
+      }
+    );
+
+    console.log(`[Diagnostic] Gemini HTTP status: ${response.status}`);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Upstream Gemini error: Status ${response.status} - Body: ${errText}`);
     }
-  );
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini error: ${response.status} - ${errText}`);
+    const data = await response.json();
+    if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+      return data.candidates[0].content.parts[0].text;
+    }
+    throw new Error("Invalid response format received from Gemini.");
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after 15 seconds calling model ${modelName}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const data = await response.json();
-  if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-    return data.candidates[0].content.parts[0].text;
-  }
-  throw new Error("Invalid response format received from Gemini.");
 }
 
 async function callGroq(prompt: string, apiKey: string): Promise<string> {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert deterministic travel planning engine. Return strictly JSON matching the required schema.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
-    }),
-  });
+  const modelName = 'qwen/qwen3.6-27b';
+  console.log(`[Diagnostic] GROQ_API_KEY secret loaded: ${!!apiKey}`);
+  console.log(`[Diagnostic] Target model name being called: ${modelName}`);
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Groq error: ${response.status} - ${errText}`);
-  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-  const data = await response.json();
-  if (data.choices && data.choices[0]?.message?.content) {
-    return data.choices[0].message.content;
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: modelName,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert deterministic travel planning engine. Return strictly JSON matching the required schema.',
+          },
+          { role: 'user', content: prompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+      }),
+    });
+
+    console.log(`[Diagnostic] Groq HTTP status: ${response.status}`);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Upstream Groq error: Status ${response.status} - Body: ${errText}`);
+    }
+
+    const data = await response.json();
+    if (data.choices && data.choices[0]?.message?.content) {
+      return data.choices[0].message.content;
+    }
+    throw new Error("Invalid response format received from Groq.");
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after 15 seconds calling model ${modelName}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  throw new Error("Invalid response format received from Groq.");
 }
 
 function cleanJsonResponse(text: string): string {
@@ -99,6 +137,23 @@ serve(async (req: Request) => {
   }
 
   try {
+    const geminiKey = Deno.env.get("GEMINI_API_KEY");
+    const groqKey = Deno.env.get("GROQ_API_KEY");
+
+    console.log(`[Diagnostic] GEMINI_API_KEY secret loaded: ${!!geminiKey}`);
+    console.log(`[Diagnostic] GROQ_API_KEY secret loaded: ${!!groqKey}`);
+
+    if (!geminiKey && !groqKey) {
+      console.error("[Diagnostic] Missing both GEMINI_API_KEY and GROQ_API_KEY runtime secrets.");
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Required runtime secrets (GEMINI_API_KEY or GROQ_API_KEY) are missing or null."
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const body = await req.json();
 
     // Extract requirements from top-level or nested object
@@ -280,11 +335,10 @@ CRITICAL PLANNING RULES:
 }`;
 
     // 6. Provider Orchestration: Gemini (Primary) -> Groq (Fallback)
-    const geminiKey = Deno.env.get("GEMINI_API_KEY");
-    const groqKey = Deno.env.get("GROQ_API_KEY");
-
     let providerUsed: "gemini" | "groq" | null = null;
     let validatedPlan: StructuredTripPlan | null = null;
+    let geminiErrorMsg = "";
+    let groqErrorMsg = "";
 
     // STEP A: Attempt Gemini First
     if (geminiKey) {
@@ -296,11 +350,15 @@ CRITICAL PLANNING RULES:
           validatedPlan = validation.plan;
           providerUsed = "gemini";
         } else {
+          geminiErrorMsg = "Gemini validation failed: " + JSON.stringify(validation.errors);
           console.warn("Gemini response failed structured validation. Initiating Groq fallback.");
         }
       } catch (geminiErr: any) {
-        console.warn("Gemini provider failed, initiating Groq fallback:", geminiErr?.message || "Unknown error");
+        geminiErrorMsg = geminiErr?.message || "Unknown Gemini error";
+        console.warn("Gemini provider failed, initiating Groq fallback:", geminiErrorMsg);
       }
+    } else {
+      geminiErrorMsg = "GEMINI_API_KEY not configured";
     }
 
     // STEP B: Attempt Groq Fallback if Gemini failed or was invalid
@@ -313,22 +371,20 @@ CRITICAL PLANNING RULES:
           validatedPlan = validation.plan;
           providerUsed = "groq";
         } else {
+          groqErrorMsg = "Groq validation failed: " + JSON.stringify(validation.errors);
           console.warn("Groq response failed structured validation.");
         }
       } catch (groqErr: any) {
-        console.warn("Groq fallback provider failed:", groqErr?.message || "Unknown error");
+        groqErrorMsg = groqErr?.message || "Unknown Groq error";
+        console.warn("Groq fallback provider failed:", groqErrorMsg);
       }
+    } else if (!validatedPlan) {
+      groqErrorMsg = "GROQ_API_KEY not configured";
     }
 
     // STEP C: If both providers failed or yielded invalid structured outputs
     if (!validatedPlan || !providerUsed) {
-      const providerNote = !geminiKey && !groqKey
-        ? "No AI provider API keys configured (GEMINI_API_KEY / GROQ_API_KEY)."
-        : !geminiKey
-        ? "GEMINI_API_KEY not set; Groq fallback also failed."
-        : !groqKey
-        ? "GROQ_API_KEY not set; Gemini also failed."
-        : "Both Gemini and Groq providers failed or returned invalid plans.";
+      const providerNote = `Gemini: [${geminiErrorMsg}] | Groq: [${groqErrorMsg}] (Keys: GEMINI_API_KEY=${!!geminiKey}, GROQ_API_KEY=${!!groqKey})`;
       console.error("trip-ai: all providers failed.", providerNote);
       return new Response(
         JSON.stringify({
